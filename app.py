@@ -43,12 +43,14 @@ def index():
         <style>
             body { font-family: Arial, sans-serif; text-align: center; background-color: #111; color: lime; }
             h1 { color: lime; }
-            video { width: 640px; height: 480px; border: 2px solid lime; margin-top: 20px; }
+            video { width: 640px; height: 480px; border: 2px solid lime; margin-top: 20px; display: none; }
             .alert { font-size: 20px; margin-top: 10px; font-weight: bold; }
+            button { background-color: lime; color: black; padding: 10px 20px; font-size: 18px; border: none; cursor: pointer; }
         </style>
     </head>
     <body>
         <h1>Employee Monitoring System</h1>
+        <button id="start-btn">Allow Camera Access</button>
         <video id="video" autoplay playsinline></video>
         <canvas id="canvas" style="display: none;"></canvas>
         <div id="alert-box" class="alert"></div>
@@ -57,15 +59,22 @@ def index():
             const video = document.getElementById('video');
             const canvas = document.getElementById('canvas');
             const ctx = canvas.getContext('2d');
+            const startBtn = document.getElementById('start-btn');
 
-            // Access user's camera
-            navigator.mediaDevices.getUserMedia({ video: true })
-                .then(stream => {
-                    video.srcObject = stream;
-                })
-                .catch(err => {
-                    console.error("Error accessing camera: ", err);
-                });
+            // Ask for camera access when button is clicked
+            startBtn.addEventListener('click', function () {
+                navigator.mediaDevices.getUserMedia({ video: true })
+                    .then(stream => {
+                        video.srcObject = stream;
+                        video.style.display = "block";  // Show video
+                        startBtn.style.display = "none";  // Hide button after permission
+                        setInterval(sendFrame, 1000);  // Start sending frames
+                    })
+                    .catch(err => {
+                        alert("Camera access denied! Please allow camera access.");
+                        console.error("Error accessing camera: ", err);
+                    });
+            });
 
             function sendFrame() {
                 canvas.width = video.videoWidth;
@@ -82,8 +91,6 @@ def index():
                       document.getElementById('alert-box').innerHTML = data.alert;
                   });
             }
-
-            setInterval(sendFrame, 1000);  // Send frame every second
         </script>
     </body>
     </html>
