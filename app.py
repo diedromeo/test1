@@ -2,7 +2,6 @@ from flask import Flask, request, jsonify
 import cv2
 import numpy as np
 import base64
-import requests
 
 app = Flask(__name__)
 
@@ -36,14 +35,13 @@ def index():
             const ctx = canvas.getContext('2d');
             const startBtn = document.getElementById('start-btn');
 
-            // Ensure camera permission is requested
             startBtn.addEventListener('click', async function () {
                 try {
                     const stream = await navigator.mediaDevices.getUserMedia({ video: true });
                     video.srcObject = stream;
                     video.style.display = "block"; // Show video
                     startBtn.style.display = "none"; // Hide button
-                    setInterval(sendFrame, 1000); // Start sending frames
+                    setInterval(sendFrame, 1000); // Send frames every second
                 } catch (err) {
                     alert("⚠️ Camera access denied! Please allow camera access in browser settings.");
                     console.error("Error accessing camera: ", err);
@@ -54,7 +52,7 @@ def index():
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                let imageData = canvas.toDataURL('image/jpeg'); // Convert frame to Base64
+                let imageData = canvas.toDataURL('image/jpeg').split(',')[1]; // Convert to Base64
 
                 fetch('/process_frame', {
                     method: 'POST',
@@ -63,7 +61,8 @@ def index():
                 }).then(response => response.json())
                   .then(data => {
                       document.getElementById('alert-box').innerHTML = data.alert;
-                  });
+                  })
+                  .catch(error => console.error('Error:', error));
             }
         </script>
     </body>
@@ -72,7 +71,19 @@ def index():
 
 @app.route('/process_frame', methods=['POST'])
 def process_frame():
-    return jsonify({"alert": "✅ Camera is working!"})
+    data = request.json.get("image")
+    if not data:
+        return jsonify({"alert": "❌ No image received!"})
+    
+    # Decode Base64 image
+    image_bytes = base64.b64decode(data)
+    np_arr = np.frombuffer(image_bytes, np.uint8)
+    frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+
+    if frame is not None:
+        return jsonify({"alert": "✅ Camera is working!"})
+    else:
+        return jsonify({"alert": "❌ Error processing image!"})
 
 if __name__ == '__main__':
     app.run(debug=True)
