@@ -1,8 +1,8 @@
-from flask import Flask, render_template, Response, jsonify
+from flask import Flask, request, jsonify
 import cv2
 import numpy as np
+import base64
 import requests
-import threading
 
 app = Flask(__name__)
 
@@ -13,7 +13,6 @@ face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_fronta
 hog = cv2.HOGDescriptor()
 hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
 
-camera = cv2.VideoCapture(0)
 background_subtractor = cv2.createBackgroundSubtractorMOG2()
 
 alert_message = ""
@@ -32,80 +31,96 @@ def send_telegram_alert(message):
         requests.post(url)
         last_alert = message
 
-def detect_employee():
-    global alert_message
-    while True:
-        success, frame = camera.read()
-        if not success:
-            break
-        
-        frame = cv2.flip(frame, 1)
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-        # Improve motion detection
-        fg_mask = background_subtractor.apply(gray)
-        fg_mask = cv2.erode(fg_mask, None, iterations=2)  # Remove noise
-        fg_mask = cv2.dilate(fg_mask, None, iterations=2)  # Fill gaps
-
-        # Detect standing (using body detection instead of simple motion)
-        bodies, _ = hog.detectMultiScale(frame, winStride=(8,8), padding=(8,8), scale=1.05)
-        if len(bodies) > 0:
-            alert_message = "<span style='color: red;'>🚨 Employee is standing! 🚨</span>"
-            threading.Thread(target=send_telegram_alert, args=("🚨 Employee is standing! 🚨",)).start()
-        else:
-            alert_message = ""
-
-        # Detect faces (Phone usage)
-        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
-        for (x, y, w, h) in faces:
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 255), 2)  # Red rectangle
-            alert_message = "<span style='color: red;'>📱🚨 Employee using phone! 🚨</span>"
-            threading.Thread(target=send_telegram_alert, args=("📱🚨 Employee using phone! 🚨",)).start()
-
-        # Draw body detections (Standing alert)
-        for (x, y, w, h) in bodies:
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)  # Blue rectangle
-
-        # Convert frame to JPEG
-        _, buffer = cv2.imencode('.jpg', frame)
-        frame_bytes = buffer.tobytes()
-        
-        yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-
 @app.route('/')
 def index():
     return '''
-    <html>
+    <!DOCTYPE html>
+    <html lang="en">
     <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Employee Monitoring</title>
         <style>
             body { font-family: Arial, sans-serif; text-align: center; background-color: #111; color: lime; }
             h1 { color: lime; }
+            video { width: 640px; height: 480px; border: 2px solid lime; margin-top: 20px; }
             .alert { font-size: 20px; margin-top: 10px; font-weight: bold; }
         </style>
-        <script>
-            function checkAlert() {
-                fetch('/alert').then(response => response.json()).then(data => {
-                    document.getElementById('alert-box').innerHTML = data.alert;
-                });
-            }
-            setInterval(checkAlert, 1000);
-        </script>
     </head>
     <body>
         <h1>Employee Monitoring System</h1>
-        <img src="/video_feed" width="640" height="480">
+        <video id="video" autoplay playsinline></video>
+        <canvas id="canvas" style="display: none;"></canvas>
         <div id="alert-box" class="alert"></div>
+
+        <script>
+            const video = document.getElementById('video');
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+
+            // Access user's camera
+            navigator.mediaDevices.getUserMedia({ video: true })
+                .then(stream => {
+                    video.srcObject = stream;
+                })
+                .catch(err => {
+                    console.error("Error accessing camera: ", err);
+                });
+
+            function sendFrame() {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                let imageData = canvas.toDataURL('image/jpeg');  // Convert frame to Base64
+
+                fetch('/process_frame', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image: imageData })
+                }).then(response => response.json())
+                  .then(data => {
+                      document.getElementById('alert-box').innerHTML = data.alert;
+                  });
+            }
+
+            setInterval(sendFrame, 1000);  // Send frame every second
+        </script>
     </body>
     </html>
     '''
 
-@app.route('/video_feed')
-def video_feed():
-    return Response(detect_employee(), mimetype='multipart/x-mixed-replace; boundary=frame')
+@app.route('/process_frame', methods=['POST'])
+def process_frame():
+    global alert_message
 
-@app.route('/alert')
-def alert():
+    # Get image from request
+    data = request.json['image']
+    img_data = base64.b64decode(data.split(',')[1])  # Convert Base64 to bytes
+    np_arr = np.frombuffer(img_data, np.uint8)
+    frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+
+    # Convert to grayscale
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+    # Background subtraction (Motion detection)
+    fg_mask = background_subtractor.apply(gray)
+    fg_mask = cv2.erode(fg_mask, None, iterations=2)
+    fg_mask = cv2.dilate(fg_mask, None, iterations=2)
+
+    # Detect standing people
+    bodies, _ = hog.detectMultiScale(frame, winStride=(8,8), padding=(8,8), scale=1.05)
+    if len(bodies) > 0:
+        alert_message = "<span style='color: red;'>🚨 Employee is standing! 🚨</span>"
+        send_telegram_alert("🚨 Employee is standing! 🚨")
+    else:
+        alert_message = ""
+
+    # Detect faces (Phone usage)
+    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+    if len(faces) > 0:
+        alert_message = "<span style='color: red;'>📱🚨 Employee using phone! 🚨</span>"
+        send_telegram_alert("📱🚨 Employee using phone! 🚨")
+
     return jsonify({"alert": alert_message})
 
 if __name__ == '__main__':
