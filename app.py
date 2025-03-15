@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, render_template
 
 app = Flask(__name__)
 
@@ -136,7 +136,7 @@ def index():
             caughtCount += 1;
             winText.innerHTML = `🎉 YOU CAUGHT IT ${caughtCount} TIME${caughtCount > 1 ? 'S' : ''}! 🎉`;
             winText.style.display = "block";
-            alert(`HOW?! 😱\\nHere is your flag:\\CyberX{R3al_C7F_7}`);
+            alert(`HOW?! 😱\nHere is your flag:\\CyberX{R3al_C7F_7}`);
         });
 
         console.log("%c🦑 Squid Game Hint: Type stopFlag() in the console to freeze the flag!", 
