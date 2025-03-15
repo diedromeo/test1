@@ -40,7 +40,6 @@ def index():
             box-shadow: 0 0 15px #ff0055;
             margin: 20px auto;
             overflow: hidden;
-            background: url('https://i.imgur.com/rUAA2yz.jpg') no-repeat center/cover;
             border-radius: 10px;
         }
 
